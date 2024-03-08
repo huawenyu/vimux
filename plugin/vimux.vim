@@ -14,7 +14,7 @@ let g:VimuxRunnerName    = get(g:, 'VimuxRunnerName',    '')
 let g:VimuxRunnerType    = get(g:, 'VimuxRunnerType',    'pane')
 let g:VimuxRunnerQuery   = get(g:, 'VimuxRunnerQuery',   {})
 let g:VimuxTmuxCommand   = get(g:, 'VimuxTmuxCommand',   'tmux')
-let g:VimuxUseNearest    = get(g:, 'VimuxUseNearest',    v:true)
+let g:VimuxUseNearest    = get(g:, 'VimuxUseNearest',    v:false)
 let g:VimuxExpandCommand = get(g:, 'VimuxExpandCommand', v:false)
 let g:VimuxCloseOnExit   = get(g:, 'VimuxCloseOnExit',   v:false)
 let g:VimuxCommandShell  = get(g:, 'VimuxCommandShell',   v:true)
@@ -93,19 +93,21 @@ function! VimuxSendKeys(keys) abort
 endfunction
 
 function! VimuxOpenRunner() abort
-  let existingId = s:existingRunnerId()
-  if existingId !=# ''
-    let g:VimuxRunnerIndex = existingId
-  else
-    let extraArguments = VimuxOption('VimuxOpenExtraArgs')
-    if VimuxOption('VimuxRunnerType') ==# 'pane'
-      call VimuxTmux('split-window '.s:vimuxPaneOptions().' '.extraArguments)
-    elseif VimuxOption('VimuxRunnerType') ==# 'window'
-      call VimuxTmux('new-window '.extraArguments)
+  if !exists('g:VimuxRunnerIndex')
+    let existingId = s:existingRunnerId()
+    if existingId !=# ''
+      let g:VimuxRunnerIndex = existingId
+    else
+      let extraArguments = VimuxOption('VimuxOpenExtraArgs')
+      if VimuxOption('VimuxRunnerType') ==# 'pane'
+        call VimuxTmux('split-window '.s:vimuxPaneOptions().' '.extraArguments)
+      elseif VimuxOption('VimuxRunnerType') ==# 'window'
+        call VimuxTmux('new-window '.extraArguments)
+      endif
+      let g:VimuxRunnerIndex = s:tmuxIndex()
+      call s:setRunnerName()
+      call VimuxTmux('last-'.VimuxOption('VimuxRunnerType'))
     endif
-    let g:VimuxRunnerIndex = s:tmuxIndex()
-    call s:setRunnerName()
-    call VimuxTmux('last-'.VimuxOption('VimuxRunnerType'))
   endif
 endfunction
 
@@ -132,6 +134,8 @@ function! VimuxTogglePane() abort
                   \)
       let g:VimuxRunnerType = 'window'
     endif
+  else
+    call VimuxOpenRunner()
   endif
 endfunction
 
@@ -235,10 +239,10 @@ function! s:existingRunnerId() abort
   let runnerType = VimuxOption('VimuxRunnerType')
   let query = get(VimuxOption('VimuxRunnerQuery'), runnerType, '')
   if empty(query)
-    if empty(VimuxOption('VimuxUseNearest'))
-      return ''
-    else
+    if VimuxOption('VimuxUseNearest')
       return s:nearestRunnerId()
+    else
+      return ''
     endif
   endif
   " Try finding the runner using the provided query
