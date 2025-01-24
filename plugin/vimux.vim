@@ -5,11 +5,11 @@ let g:loaded_vimux = 1
 
 " Set up all global options with defaults right away, in one place
 let g:VimuxDebug         = get(g:, 'VimuxDebug',         v:false)
-let g:VimuxHeight        = get(g:, 'VimuxHeight',        20)
+let g:VimuxHeight        = get(g:, 'VimuxHeight',        '20%')
 let g:VimuxOpenExtraArgs = get(g:, 'VimuxOpenExtraArgs', '')
 let g:VimuxOrientation   = get(g:, 'VimuxOrientation',   'v')
 let g:VimuxPromptString  = get(g:, 'VimuxPromptString',  'Command? ')
-let g:VimuxResetSequence = get(g:, 'VimuxResetSequence', 'q C-u')
+let g:VimuxResetSequence = get(g:, 'VimuxResetSequence', 'C-u')
 let g:VimuxRunnerName    = get(g:, 'VimuxRunnerName',    '')
 let g:VimuxRunnerType    = get(g:, 'VimuxRunnerType',    'pane')
 let g:VimuxRunnerQuery   = get(g:, 'VimuxRunnerQuery',   {})
@@ -71,9 +71,11 @@ function! VimuxRunCommand(command, ...) abort
   if exists('a:1')
     let l:autoreturn = a:1
   endif
-  let resetSequence = VimuxOption('VimuxResetSequence')
+  let l:resetSequence = VimuxOption('VimuxResetSequence')
   let g:VimuxLastCommand = a:command
-  call VimuxSendKeys(resetSequence)
+
+  call s:exitCopyMode()
+  call VimuxSendKeys(l:resetSequence)
   call VimuxSendText(a:command)
   if l:autoreturn ==# 1
     call VimuxSendKeys('Enter')
@@ -171,13 +173,14 @@ function! VimuxInterruptRunner() abort
 endfunction
 
 function! VimuxClearTerminalScreen() abort
-  if exists('g:VimuxRunnerIndex')
+  if exists('g:VimuxRunnerIndex') && s:hasRunner(g:VimuxRunnerIndex) !=# -1
+    call s:exitCopyMode()
     call VimuxSendKeys('C-l')
   endif
 endfunction
 
 function! VimuxClearRunnerHistory() abort
-  if exists('g:VimuxRunnerIndex')
+  if exists('g:VimuxRunnerIndex') && s:hasRunner(g:VimuxRunnerIndex) !=# -1
     call VimuxTmux('clear-history -t '.g:VimuxRunnerIndex)
   endif
 endfunction
@@ -196,14 +199,30 @@ function! VimuxPromptCommand(...) abort
 endfunction
 
 function! VimuxTmux(arguments) abort
+  let l:tmuxCommand = VimuxOption('VimuxTmuxCommand').' '.a:arguments
   if VimuxOption('VimuxDebug')
-    echom VimuxOption('VimuxTmuxCommand').' '.a:arguments
+    echom l:tmuxCommand
   endif
   if has_key(environ(), 'TMUX')
-    return system(VimuxOption('VimuxTmuxCommand').' '.a:arguments)
+    let l:output = system(l:tmuxCommand)
+    if v:shell_error
+      throw 'Tmux command failed with message:' . l:output
+    endif
+    return l:output
   else
     throw 'Aborting, because not inside tmux session.'
   endif
+endfunction
+
+function! s:exitCopyMode() abort
+  try
+    call VimuxTmux('copy-mode -q -t '.g:VimuxRunnerIndex)
+  catch
+    let l:versionString = s:tmuxProperty('#{version}')
+    if str2float(l:versionString) < 3.2
+        call VimuxSendKeys('q')
+    endif
+  endtry
 endfunction
 
 function! s:tmuxSession() abort
@@ -229,7 +248,7 @@ endfunction
 function! s:vimuxPaneOptions() abort
     let height = VimuxOption('VimuxHeight')
     let orientation = VimuxOption('VimuxOrientation')
-    return '-l '.height.'% -'.orientation
+    return '-l '.height.' -'.orientation
 endfunction
 
 ""
