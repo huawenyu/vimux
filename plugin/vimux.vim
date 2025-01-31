@@ -2,6 +2,7 @@ if exists('g:loaded_vimux') || &compatible
   finish
 endif
 let g:loaded_vimux = 1
+let s:nearestTitle = ""
 
 " Set up all global options with defaults right away, in one place
 let g:VimuxDebug         = get(g:, 'VimuxDebug',         v:false)
@@ -17,7 +18,8 @@ let g:VimuxTmuxCommand   = get(g:, 'VimuxTmuxCommand',   'tmux')
 let g:VimuxUseNearest    = get(g:, 'VimuxUseNearest',    v:false)
 let g:VimuxExpandCommand = get(g:, 'VimuxExpandCommand', v:false)
 let g:VimuxCloseOnExit   = get(g:, 'VimuxCloseOnExit',   v:false)
-let g:VimuxCommandShell  = get(g:, 'VimuxCommandShell',   v:true)
+let g:VimuxCommandShell  = get(g:, 'VimuxCommandShell',  v:true)
+let g:VimuxAutoAction    = get(g:, 'VimuxAutoAction',    ":copy:reset:")
 
 function! VimuxOption(name) abort
   return get(b:, a:name, get(g:, a:name))
@@ -30,7 +32,7 @@ endif
 
 command -nargs=* VimuxRunCommand :call VimuxRunCommand(<args>)
 command -bar VimuxRunLastCommand :call VimuxRunLastCommand()
-command -bar VimuxOpenRunner :call VimuxOpenRunner()
+command -nargs=* VimuxOpenRunner :call VimuxOpenRunner(<args>)
 command -bar VimuxCloseRunner :call VimuxCloseRunner()
 command -bar VimuxZoomRunner :call VimuxZoomRunner()
 command -bar VimuxInspectRunner :call VimuxInspectRunner()
@@ -74,8 +76,14 @@ function! VimuxRunCommand(command, ...) abort
   let l:resetSequence = VimuxOption('VimuxResetSequence')
   let g:VimuxLastCommand = a:command
 
-  call s:exitCopyMode()
-  call VimuxSendKeys(l:resetSequence)
+  if match(g:VimuxAutoAction, ":copy:") !=# -1
+    call s:exitCopyMode()
+  endif
+
+  if match(g:VimuxAutoAction, ":reset:") !=# -1
+    call VimuxSendKeys(l:resetSequence)
+  endif
+
   call VimuxSendText(a:command)
   if l:autoreturn ==# 1
     call VimuxSendKeys('Enter')
@@ -94,8 +102,12 @@ function! VimuxSendKeys(keys) abort
   endif
 endfunction
 
-function! VimuxOpenRunner() abort
+function! VimuxOpenRunner(title = '') abort
   if !exists('g:VimuxRunnerIndex')
+    if !empty(a:title)
+      let s:nearestTitle = a:title
+    endif
+
     let existingId = s:existingRunnerId()
     if existingId !=# ''
       let g:VimuxRunnerIndex = existingId
@@ -288,14 +300,57 @@ function! s:nearestRunnerId() abort
   let views = split(
               \ VimuxTmux(
               \     'list-'.runnerType.'s'
-              \     ." -F '#{".runnerType.'_active}:#{'.runnerType."_id}'"
+              \     ." -F '#{".runnerType.'_active}:#{'.runnerType."_id}:#{".runnerType."_title}'"
               \     .filter),
               \ '\n')
   " '1:' is the current active pane (the one with vim).
   " Find the first non-active pane.
+  if VimuxOption('VimuxDebug')
+    echomsg views
+  endif
+
+  " Choose first if specify title
+  if !empty(s:nearestTitle)
+    for view in views
+      if !empty(s:nearestTitle)
+        if match(view, s:nearestTitle) !=# -1
+          let vid = split(view, ':')[1]
+          if VimuxOption('VimuxDebug')
+            echomsg "title vid=" .. vid
+          endif
+          return vid
+        endif
+      endif
+    endfor
+  endif
+
+  " Then find nearest acording g:VimuxOrientation:
+  "  - v: preVious
+  "  - h: beHind
+  let l:found = 0
   for view in views
-    if match(view, '1:') ==# -1
-      return split(view, ':')[1]
+    if l:found == 1
+      let vid = split(view, ':')[1]
+      if VimuxOption('VimuxDebug')
+        echomsg "vid=" .. vid
+      endif
+      return vid
+    endif
+
+    let l:preView = view
+    " Locate self-active target
+    if match(view, '1:') !=# -1
+
+      if g:VimuxOrientation ==# 'v'
+        let vid = split(l:preView, ':')[1]
+        if VimuxOption('VimuxDebug')
+          echomsg "vid=" .. vid
+        endif
+        return vid
+      else
+        let l:found = 1
+        continue
+      endif
     endif
   endfor
   return ''
